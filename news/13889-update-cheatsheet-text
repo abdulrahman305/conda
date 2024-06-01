@@ -4,7 +4,7 @@
 
 ### Bug fixes
 
-* Fix prefix replacement for Windows subdir on unixes. (#13689)
+* <news item>
 
 ### Deprecations
 
@@ -12,7 +12,7 @@
 
 ### Docs
 
-* <news item>
+* Update conda cheatsheet text and add it directly to cheatsheet page. (#13889)
 
 ### Other
 

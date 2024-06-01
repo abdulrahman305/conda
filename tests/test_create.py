@@ -72,6 +72,7 @@ from conda.gateways.subprocess import (
 from conda.models.channel import Channel
 from conda.models.match_spec import MatchSpec
 from conda.resolve import Resolve
+from conda.testing.helpers import CHANNEL_DIR_V2
 from conda.testing.integration import (
     BIN_DIRECTORY,
     PYTHON_BINARY,
@@ -766,9 +767,6 @@ def test_strict_resolve_get_reduced_index(monkeypatch: MonkeyPatch):
 def test_list_with_pip_no_binary(tmp_env: TmpEnvFixture, conda_cli: CondaCLIFixture):
     from conda.exports import rm_rf as _rm_rf
 
-    # For this test to work on Windows, you can either pass use_restricted_unicode=on_win
-    # to make_temp_env(), or you can set PYTHONUTF8 to 1 (and use Python 3.7 or above).
-    # We elect to test the more complex of the two options.
     py_ver = "3.10"
     with tmp_env(f"python={py_ver}", "pip") as prefix:
         check_call(
@@ -1635,6 +1633,8 @@ def test_conda_pip_interop_pip_clobbers_conda(
     tmp_env: TmpEnvFixture,
     conda_cli: CondaCLIFixture,
 ):
+    if "conda-forge" in context.channels:
+        pytest.skip("This test is too slow with conda-forge as default channel.")
     # 1. conda install old six
     # 2. pip install -U six
     # 3. conda list shows new six and deletes old conda record
@@ -1973,6 +1973,8 @@ def test_conda_pip_interop_compatible_release_operator(
     tmp_env: TmpEnvFixture,
     conda_cli: CondaCLIFixture,
 ):
+    if "conda-forge" in context.channels:
+        pytest.skip("This test is too slow with conda-forge as default channel.")
     # Regression test for #7776
     # important to start the env with six 1.9.  That version forces an upgrade later in the test
     monkeypatch.setenv("CONDA_PIP_INTEROP_ENABLED", "true")
@@ -2499,7 +2501,9 @@ def test_cross_channel_incompatibility(conda_cli: CondaCLIFixture, tmp_path: Pat
             "create",
             f"--prefix={tmp_path}",
             "--dry-run",
+            "--override-channels",
             "--channel=conda-forge",
+            "--channel=defaults",
             "python",
             "boost==1.82.0",
             "boost-cpp==1.82.0",
@@ -2548,3 +2552,56 @@ def test_remove_ignore_nonenv(tmp_path: Path, conda_cli: CondaCLIFixture):
 
     assert filename.exists()
     assert tmp_path.exists()
+
+
+def test_repodata_v2_base_url(
+    tmp_path: Path,
+    conda_cli: CondaCLIFixture,
+    monkeypatch: MonkeyPatch,
+    request: FixtureRequest,
+):
+    if context.solver == "libmamba":
+        request.applymarker(
+            pytest.mark.xfail(
+                context.solver == "libmamba",
+                reason="Libmamba does not support CEP-15 yet.",
+                strict=True,
+                run=True,
+            )
+        )
+    monkeypatch.setenv("CONDA_PKGS_DIRS", str(tmp_path / "pkgs"))
+    reset_context()
+    prefix = tmp_path / "env"
+    platform = (
+        "linux-64"
+        if context.subdir not in ("win-64", "linux-64", "osx-64")
+        else context.subdir
+    )
+    conda_cli(
+        "create",
+        f"--prefix={prefix}",
+        "--yes",
+        "--override-channels",
+        "-c",
+        CHANNEL_DIR_V2,
+        "ca-certificates",
+        "--platform",
+        platform,
+    )
+    assert package_is_installed(prefix, "ca-certificates")
+
+
+def test_create_dry_run_without_prefix(
+    conda_cli: CondaCLIFixture, capsys: CaptureFixture
+):
+    with pytest.raises(DryRunExit):
+        conda_cli("create", "--dry-run", "--json", "ca-certificates")
+    out, _ = capsys.readouterr()
+    data = json.loads(out)
+    assert any(
+        pkg for pkg in data["actions"]["LINK"] if pkg["name"] == "ca-certificates"
+    )
+
+
+def test_create_without_prefix_raises_argument_error(conda_cli: CondaCLIFixture):
+    conda_cli("create", "--json", "ca-certificates", raises=ArgumentError)
